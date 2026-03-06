@@ -181,6 +181,98 @@ verified_by: tester-agent
         f.write(content)
 
 
+def revise_plan(feature_request, rejection_feedback, session_number):
+    """Revise architecture based on Lead's rejection feedback."""
+
+    claude_rules = read_file_safe("CLAUDE.md")
+    existing_spec = read_file_safe("contracts/api-spec.md")
+    existing_tasks = read_file_safe("tasks/TASKS.md")
+
+    prompt = f"""You are the SENIOR SYSTEM ARCHITECT for a Rust modular monolith backend project.
+
+This is REVISION #{session_number}. Your previous architecture was REJECTED by the Lead.
+
+PROJECT RULES (read carefully):
+{claude_rules}
+
+FEATURE REQUEST:
+{feature_request}
+
+YOUR PREVIOUS ARCHITECTURE SPEC (that was rejected):
+{existing_spec}
+
+LEAD'S REJECTION FEEDBACK (read carefully and address ALL points):
+{rejection_feedback}
+
+You MUST:
+1. Read the rejection feedback carefully
+2. Address EVERY concern raised by the Lead
+3. Revise the architecture to fix the issues
+4. Keep what was good, fix what was rejected
+
+You must produce TWO clearly separated outputs.
+
+SECTION 1 - REVISED API SPECIFICATION:
+Write the corrected REST API specification addressing the Lead's feedback.
+For each endpoint include:
+- Method (GET/POST/PUT/DELETE)
+- Path
+- Request body (JSON example)
+- Response body (JSON example using format: {{"data": T, "error": null}})
+- Error responses
+
+SECTION 2 - REVISED TASK LIST:
+Write development tasks, one per line, using EXACTLY this format:
+
+TASKS:
+[ ] Create task domain model in src/modules/tasks/model.rs
+[ ] Implement task repository in src/modules/tasks/repository.rs
+
+RULES:
+- Follow modular monolith architecture from CLAUDE.md
+- Each module needs: mod.rs, model.rs, service.rs, repository.rs, handlers.rs
+- All modules go under src/modules/
+- Do NOT write any implementation code
+- Start each task line with [ ] exactly
+"""
+
+    response = ollama.chat(
+        model="llama3:8b",
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    result = response["message"]["content"]
+
+    # Write revised plan to api-spec.md
+    with open("contracts/api-spec.md", "w") as f:
+        f.write(f"# REVISION {session_number}\n\n")
+        f.write(result)
+
+    # Extract and update tasks
+    task_lines = []
+    for line in result.split("\n"):
+        stripped = line.strip()
+        if re.match(r'^[-*]?\s*\[ \]\s+\S', stripped):
+            task = re.sub(r'^[-*]\s*', '', stripped)
+            task_lines.append(task)
+
+    if task_lines:
+        _update_tasks_file(task_lines)
+        print(f"Architect: Revision {session_number} - Created {len(task_lines)} tasks")
+    else:
+        # Fallback extraction
+        for line in result.split("\n"):
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and len(stripped) > 10:
+                if any(kw in stripped.lower() for kw in ["implement", "create", "add", "build", "design", "write"]):
+                    task_lines.append(f"[ ] {stripped}")
+        if task_lines:
+            _update_tasks_file(task_lines)
+
+    print(f"Architect: Revision {session_number} complete")
+    return result
+
+
 def run_architect():
     """Standalone continuous loop mode."""
     while True:

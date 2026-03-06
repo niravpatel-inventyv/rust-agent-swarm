@@ -318,6 +318,111 @@ Only include files that need changes. Return COMPLETE file contents, not just ch
     return exit_code == 0
 
 
+def refactor_code(refactor_feedback, session_number):
+    """Refactor code based on Lead's code review feedback."""
+
+    claude_rules = read_file_safe("CLAUDE.md")
+    api_spec = read_file_safe("contracts/api-spec.md")
+    existing_code = get_existing_rust_code()
+
+    prompt = f"""You are a senior Rust backend developer. The Lead rejected your code and wants refactoring.
+
+This is REFACTOR SESSION {session_number}. You MUST address ALL of the Lead's feedback.
+
+PROJECT RULES:
+{claude_rules}
+
+API SPECIFICATION:
+{api_spec}
+
+CURRENT SOURCE CODE:
+{existing_code}
+
+LEAD'S REFACTOR INSTRUCTIONS (address ALL points):
+{refactor_feedback}
+
+CRITICAL:
+1. Read the Lead's feedback carefully
+2. Fix EVERY issue mentioned
+3. Keep code that was not mentioned as problematic
+4. Follow the modular monolith structure
+5. Use proper error handling with Result — NEVER use unwrap()
+6. Make sure the code compiles
+
+OUTPUT FORMAT — use this EXACT format for EVERY file you modify:
+
+FILE: <exact file path>
+CODE:
+<complete file content — not just the changed parts>
+
+Return COMPLETE file contents for every file that needs changes.
+Do NOT skip any file that needs modification.
+"""
+
+    response = ollama.chat(
+        model="deepseek-coder:6.7b",
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    result = response["message"]["content"]
+    file_blocks = parse_file_blocks(result)
+
+    if not file_blocks:
+        print(f"Developer: Refactor {session_number} - Could not parse LLM output")
+        with open("tasks/BLOCKED.md", "a") as f:
+            f.write(f"""
+agent: developer
+task: Refactor session {session_number}
+problem: Could not parse refactor LLM output
+attempted_solution: Need manual intervention
+status: unresolved
+
+""")
+        return False
+
+    modified_files = []
+    for path, code in file_blocks.items():
+        if not path.startswith("src/"):
+            path = "src/" + path
+        write_file(path, code)
+        modified_files.append(path)
+        print(f"Developer: Refactored {path}")
+
+    # Build check
+    build_output, exit_code = run_command("cargo build 2>&1")
+    print(f"Developer: Refactor build exit code: {exit_code}")
+
+    if exit_code != 0:
+        print(f"Developer: Refactor build failed, attempting self-heal...")
+        fixed = self_heal(f"Refactor session {session_number}", build_output, modified_files)
+        if not fixed:
+            with open("tasks/BLOCKED.md", "a") as f:
+                f.write(f"""
+agent: developer
+task: Refactor session {session_number}
+problem: cargo build failed after refactor + self-heal
+attempted_solution: LLM fix did not resolve errors
+status: unresolved
+
+""")
+            return False
+
+    # Log progress
+    files_str = "\n".join(modified_files)
+    with open("tasks/PROGRESS.md", "a") as f:
+        f.write(f"""
+agent: developer
+task: Refactor session {session_number}
+description: Refactored code based on Lead feedback
+files_modified:
+{files_str}
+
+""")
+
+    print(f"Developer: Refactor session {session_number} complete")
+    return True
+
+
 def run_developer():
     """Standalone continuous loop mode."""
     while True:
