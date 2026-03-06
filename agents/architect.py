@@ -42,22 +42,32 @@ Write a detailed REST API specification. For each endpoint include:
 SECTION 2 - TASK LIST:
 Write development tasks, one per line, using EXACTLY this format:
 
+IMPORTANT: Derive the module name from the FEATURE REQUEST above.
+For example:
+- If the feature is about "users", the module is src/users/
+- If the feature is about "orders", the module is src/orders/
+- If the feature is about "products", the module is src/products/
+Do NOT default to "tasks" — use the actual domain entity from the feature request.
+
 TASKS:
-[ ] Create task domain model in src/modules/tasks/model.rs
-[ ] Implement task repository in src/modules/tasks/repository.rs
-[ ] Implement task service layer in src/modules/tasks/service.rs
-[ ] Create HTTP handlers in src/modules/tasks/handlers.rs
-[ ] Create module declaration in src/modules/tasks/mod.rs
-[ ] Wire task module routes into src/main.rs
-[ ] Add integration tests for task API
+[ ] Create <module_name> domain model in src/<module_name>/model.rs
+[ ] Implement <module_name> repository in src/<module_name>/repository.rs
+[ ] Implement <module_name> service layer in src/<module_name>/service.rs
+[ ] Create HTTP handlers in src/<module_name>/handlers.rs
+[ ] Create module declaration in src/<module_name>/mod.rs
+[ ] Wire <module_name> module routes into src/main.rs
+[ ] Add integration tests for <module_name> API
+
+Replace <module_name> with the actual domain entity from the feature request (e.g. "users", "orders", etc.)
 
 RULES:
 - Follow modular monolith architecture from CLAUDE.md
 - Each module needs: mod.rs, model.rs, service.rs, repository.rs, handlers.rs
-- All modules go under src/modules/
+- All modules go under src/
 - Do NOT write any implementation code
 - Order tasks by dependency (foundational tasks first)
 - Start each task line with [ ] exactly
+- Module name MUST match the domain entity from the feature request
 """
 
     response = ollama.chat(
@@ -224,16 +234,25 @@ For each endpoint include:
 SECTION 2 - REVISED TASK LIST:
 Write development tasks, one per line, using EXACTLY this format:
 
+IMPORTANT: Derive the module name from the FEATURE REQUEST above.
+For example:
+- If the feature is about "users", the module is src/users/
+- If the feature is about "orders", the module is src/orders/
+Do NOT default to "tasks" — use the actual domain entity from the feature request.
+
 TASKS:
-[ ] Create task domain model in src/modules/tasks/model.rs
-[ ] Implement task repository in src/modules/tasks/repository.rs
+[ ] Create <module_name> domain model in src/<module_name>/model.rs
+[ ] Implement <module_name> repository in src/<module_name>/repository.rs
+
+Replace <module_name> with the actual domain entity from the feature request.
 
 RULES:
 - Follow modular monolith architecture from CLAUDE.md
 - Each module needs: mod.rs, model.rs, service.rs, repository.rs, handlers.rs
-- All modules go under src/modules/
+- All modules go under src/
 - Do NOT write any implementation code
 - Start each task line with [ ] exactly
+- Module name MUST match the domain entity from the feature request
 """
 
     response = ollama.chat(

@@ -25,29 +25,6 @@ Rules:
 
 # TASK LIST
 
-[ ] Design API models for tasks module
-owner: architect
-status: waiting for lead approval
-
-
-[ ] Implement Axum HTTP server bootstrap
-owner: developer
-status: waiting for lead approval
-
-
-[ ] Implement task repository
-owner: developer
-status: waiting for lead approval
-
-
-[ ] Implement task service layer
-owner: developer
-status: waiting for lead approval
-
-
-[ ] Add integration tests for task API
-owner: tester
-status: waiting for implementation
 
 
 --------------------------------------------------

@@ -84,7 +84,12 @@ module_name
 
 Example module:
 
-src/modules/tasks
+src/<MODULE_NAME>/
+  mod.rs
+  model.rs
+  service.rs
+  repository.rs
+  handlers.rs
 
 Responsibilities:
 

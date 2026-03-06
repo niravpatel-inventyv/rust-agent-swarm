@@ -50,7 +50,7 @@ YOUR RESPONSIBILITIES:
 2. Check that modular monolith boundaries are respected
 3. Verify the API specification follows project rules
 4. Review each task for clarity and completeness
-5. Ensure tasks follow the correct module structure: src/modules/<name>/
+5. Ensure tasks follow the correct module structure: src/<name>/
 
 You MUST write your review in this EXACT format:
 

@@ -3,6 +3,7 @@ import subprocess
 import os
 import re
 import time
+from datetime import datetime
 
 
 def read_file_safe(path, default=""):
@@ -68,58 +69,183 @@ def get_existing_rust_code():
     return code
 
 
+ALLOWED_EXTENSIONS = (".rs", ".toml")
+
+
+def _is_valid_path(path):
+    """Check if path looks like a valid project file."""
+    return path and any(path.endswith(ext) for ext in ALLOWED_EXTENSIONS)
+
+
+def _clean_code_fences(code):
+    """Remove markdown code fence markers from code."""
+    code = re.sub(r'^```\w*\s*$', '', code, flags=re.MULTILINE)
+    return code.strip()
+
+
+def _extract_path(text):
+    """Try to extract a file path from a line of text."""
+    # Remove markdown formatting
+    cleaned = re.sub(r'[*#`]', '', text).strip()
+    # Look for path pattern
+    match = re.search(r'((?:src/)?[a-zA-Z0-9_/\-]+\.(?:rs|toml))', cleaned)
+    return match.group(1) if match else None
+
+
 def parse_file_blocks(llm_output):
-    """Parse FILE: path / CODE: blocks from LLM output."""
+    """Parse file blocks from LLM output using multiple strategies."""
     files = {}
 
-    # Split by FILE: markers
-    parts = re.split(r'(?:^|\n)FILE:\s*', llm_output)
+    # Strategy 1: FILE: path / CODE: format (original expected format)
+    if "FILE:" in llm_output:
+        parts = re.split(r'(?:^|\n)FILE:\s*', llm_output)
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            lines = part.split("\n")
+            if not lines:
+                continue
+            path = lines[0].strip().strip('`').strip('"').strip("'").strip()
+            if not _is_valid_path(path):
+                continue
+            code_start = 1
+            for i in range(1, len(lines)):
+                line = lines[i].strip()
+                if line.startswith("CODE:"):
+                    code_start = i + 1
+                    break
+                if line.startswith("```"):
+                    code_start = i + 1
+                    break
+            code = "\n".join(lines[code_start:])
+            code = _clean_code_fences(code)
+            if path and code:
+                files[path.lstrip("./")] = code
 
-    for part in parts:
-        part = part.strip()
-        if not part:
+    if files:
+        return files
+
+    # Strategy 2: Markdown headers with code fences
+    # Matches: ### src/tasks/model.rs  OR  **src/tasks/model.rs**  OR  `src/tasks/model.rs`
+    # followed by a ```rust code block
+    segments = re.split(r'\n(?=#{1,4}\s|\*\*[a-zA-Z])', llm_output)
+    for segment in segments:
+        first_line = segment.split("\n")[0]
+        path = _extract_path(first_line)
+        if not path or not _is_valid_path(path):
             continue
+        code_match = re.search(r'```\w*\s*\n(.*?)```', segment, re.DOTALL)
+        if code_match:
+            code = code_match.group(1).strip()
+            if code:
+                files[path.lstrip("./")] = code
 
-        lines = part.split("\n")
+    if files:
+        return files
+
+    # Strategy 3: Code fences with file path as first comment line
+    # Matches: ```rust\n// src/tasks/model.rs\n...```
+    blocks = re.findall(r'```(?:rust|toml)?\s*\n(.*?)```', llm_output, re.DOTALL)
+    for block in blocks:
+        lines = block.strip().split("\n")
         if not lines:
             continue
+        first = lines[0].strip()
+        if first.startswith("//") or first.startswith("#"):
+            path = _extract_path(first)
+            if path and _is_valid_path(path):
+                code = "\n".join(lines[1:]).strip()
+                if code:
+                    files[path.lstrip("./")] = code
 
-        # First line is the file path
-        path = lines[0].strip().strip('`').strip('"').strip("'").strip()
-        if not path or not path.endswith(".rs"):
+    if files:
+        return files
+
+    # Strategy 4: Multiple code fences — try to infer filenames from content
+    for block in blocks:
+        block = block.strip()
+        if not block:
             continue
-
-        # Find CODE: marker or first code fence
-        code_start = 1
-        for i in range(1, len(lines)):
-            line = lines[i].strip()
-            if line.startswith("CODE:"):
-                code_start = i + 1
-                break
-            if line.startswith("```"):
-                code_start = i + 1
-                break
-
-        # Extract code
-        code_lines = lines[code_start:]
-        code = "\n".join(code_lines)
-
-        # Remove markdown code fences
-        code = re.sub(r'^```\w*\s*\n?', '', code, flags=re.MULTILINE)
-        code = re.sub(r'\n?```\s*$', '', code)
-        code = code.strip()
-
-        if path and code:
-            path = path.lstrip("./")
-            files[path] = code
+        # Try to infer from mod declarations or struct names
+        if "pub mod " in block and len(block.split("\n")) < 10:
+            files["src/lib.rs"] = block
+        elif "fn main" in block:
+            files["src/main.rs"] = block
+        elif "[dependencies]" in block or "[package]" in block:
+            files["Cargo.toml"] = block
 
     return files
+
+
+# Common crate names mapped to Cargo.toml dependency lines
+COMMON_DEPS = {
+    "axum": 'axum = "0.7"',
+    "tokio": 'tokio = { version = "1", features = ["full"] }',
+    "serde": 'serde = { version = "1", features = ["derive"] }',
+    "serde_json": 'serde_json = "1"',
+    "uuid": 'uuid = { version = "1", features = ["v4", "serde"] }',
+    "tower": 'tower = "0.5"',
+    "tower_http": 'tower-http = { version = "0.6", features = ["cors", "trace"] }',
+    "tracing": 'tracing = "0.1"',
+    "tracing_subscriber": 'tracing-subscriber = "0.3"',
+}
+
+
+def ensure_dependencies(created_files):
+    """Scan created .rs files for crate usage and auto-add missing deps to Cargo.toml."""
+    all_code = ""
+    for path in created_files:
+        if path.endswith(".rs"):
+            all_code += read_file_safe(path) + "\n"
+
+    cargo = read_file_safe("Cargo.toml")
+    needed = []
+    for crate_name, dep_line in COMMON_DEPS.items():
+        cargo_name = crate_name.replace("_", "-")
+        if re.search(rf'use\s+{crate_name}', all_code) and cargo_name not in cargo:
+            needed.append(dep_line)
+
+    if needed:
+        lines = cargo.rstrip().split("\n")
+        # Find [dependencies] line and insert after it
+        dep_idx = None
+        for i, line in enumerate(lines):
+            if line.strip() == "[dependencies]":
+                dep_idx = i
+                break
+        if dep_idx is not None:
+            for dep in reversed(needed):
+                lines.insert(dep_idx + 1, dep)
+        else:
+            lines.append("\n[dependencies]")
+            lines.extend(needed)
+        with open("Cargo.toml", "w") as f:
+            f.write("\n".join(lines) + "\n")
+        print(f"Developer: Auto-added {len(needed)} dependencies to Cargo.toml: {[d.split('=')[0].strip() for d in needed]}")
+
+
+def write_parsed_files(file_blocks):
+    """Write parsed file blocks to disk, handling path prefixes correctly."""
+    created_files = []
+    for path, code in file_blocks.items():
+        # Only prepend src/ for .rs files that don't already have it
+        if path.endswith(".rs") and not path.startswith("src/"):
+            path = "src/" + path
+        # Cargo.toml always goes to project root
+        if path.endswith("Cargo.toml"):
+            path = "Cargo.toml"
+        write_file(path, code)
+        created_files.append(path)
+        print(f"Developer: Created {path}")
+    return created_files
 
 
 def update_progress(task_name, files_list):
     """Append progress entry in the correct format from PROGRESS.md."""
     files_str = "\n".join(files_list)
     entry = f"""
+    
 agent: developer
 task: {task_name}
 description: Implemented {task_name}
@@ -128,11 +254,14 @@ files_modified:
 
 """
     with open("tasks/PROGRESS.md", "a") as f:
-        f.write(entry)
+        f.write("\n" + entry)
 
 
 def implement_task(task_name):
     """Implement a specific task. Called by orchestrator."""
+
+    task_start = datetime.now()
+    print(f"Developer: [START {task_start.strftime('%H:%M:%S')}] Task: {task_name}")
 
     # Read all context files
     claude_rules = read_file_safe("CLAUDE.md")
@@ -164,7 +293,7 @@ YOUR TASK: {task_name}
 
 CRITICAL INSTRUCTIONS:
 1. Follow the modular monolith structure from CLAUDE.md
-2. Create files under src/modules/<module_name>/ with: mod.rs, model.rs, service.rs, repository.rs, handlers.rs
+2. Create files under src/<module_name>/ with: mod.rs, model.rs, service.rs, repository.rs, handlers.rs
 3. Use proper error handling with Result types - NEVER use unwrap() in production code
 4. Use async/await with tokio where appropriate
 5. Follow the API response format: {{ "data": T, "error": null }} or {{ "data": null, "error": "message" }}
@@ -174,22 +303,25 @@ CRITICAL INSTRUCTIONS:
 
 OUTPUT FORMAT - You MUST use this EXACT format for EVERY file:
 
-FILE: src/modules/tasks/model.rs
+FILE: src/<module_name>/model.rs
 CODE:
 use serde::{{Serialize, Deserialize}};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Task {{
+pub struct Entity {{
     pub id: String,
-    pub title: String,
+    pub name: String,
 }}
 
-FILE: src/modules/tasks/mod.rs
+FILE: src/<module_name>/mod.rs
 CODE:
 pub mod model;
 pub mod repository;
 pub mod service;
 pub mod handlers;
+
+IMPORTANT: Replace <module_name> with the actual module name from the task (e.g. if task says src/users/, use src/users/).
+Do NOT hardcode "tasks" as the module name — use whatever module name the task specifies.
 
 Generate ALL files needed for this task. Every FILE: block must have COMPLETE, COMPILABLE Rust code.
 Do NOT use placeholder comments, todo!(), or unimplemented!().
@@ -223,31 +355,31 @@ status: unresolved
         return result
 
     # Write all parsed files to disk
-    created_files = []
-    for path, code in file_blocks.items():
-        # Ensure path starts with src/
-        if not path.startswith("src/"):
-            path = "src/" + path
+    created_files = write_parsed_files(file_blocks)
 
-        write_file(path, code)
-        created_files.append(path)
-        print(f"Developer: Created {path}")
+    # Auto-detect and add missing dependencies
+    ensure_dependencies(created_files)
 
     # Try to build
     build_output, exit_code = run_command("cargo build 2>&1")
     print(f"Developer: cargo build exit code: {exit_code}")
 
     if exit_code != 0:
-        print(f"Developer: Build failed, attempting self-heal...")
-        print(f"Developer: Build errors:\n{build_output[:1000]}")
+        print(f"Developer: Build FAILED — logging errors...")
+        print(f"Developer: Build errors:\n{build_output[:2000]}")
+        print(f"Developer: Attempting self-heal (sending errors to LLM)...")
         fixed = self_heal(task_name, build_output, created_files)
-        if not fixed:
+        if fixed:
+            print(f"Developer: Self-heal SUCCEEDED — build now passes")
+        else:
+            print(f"Developer: Self-heal FAILED — build still broken")
             with open("tasks/BLOCKED.md", "a") as f:
                 f.write(f"""
 agent: developer
 task: {task_name}
 problem: cargo build failed after self-heal attempt
 attempted_solution: LLM fix attempt did not resolve errors
+build_errors: {build_output[:500]}
 status: unresolved
 
 """)
@@ -258,7 +390,9 @@ status: unresolved
     # Update progress in the correct format
     update_progress(task_name, created_files)
 
-    print(f"Developer: Task '{task_name}' complete, marked [TEST]")
+    task_end = datetime.now()
+    elapsed = (task_end - task_start).total_seconds()
+    print(f"Developer: [END {task_end.strftime('%H:%M:%S')}] Task: {task_name} — took {elapsed:.1f}s")
     return result
 
 
@@ -305,11 +439,10 @@ Only include files that need changes. Return COMPLETE file contents, not just ch
         print("Developer: Self-heal could not parse fix output")
         return False
 
-    for path, code in fix_blocks.items():
-        if not path.startswith("src/"):
-            path = "src/" + path
-        write_file(path, code)
-        print(f"Developer: Fixed {path}")
+    fixed_files = write_parsed_files(fix_blocks)
+
+    # Re-check dependencies after fix
+    ensure_dependencies(fixed_files + file_paths)
 
     # Rebuild
     build_output, exit_code = run_command("cargo build 2>&1")
@@ -380,13 +513,10 @@ status: unresolved
 """)
         return False
 
-    modified_files = []
-    for path, code in file_blocks.items():
-        if not path.startswith("src/"):
-            path = "src/" + path
-        write_file(path, code)
-        modified_files.append(path)
-        print(f"Developer: Refactored {path}")
+    modified_files = write_parsed_files(file_blocks)
+
+    # Re-check dependencies after refactor
+    ensure_dependencies(modified_files)
 
     # Build check
     build_output, exit_code = run_command("cargo build 2>&1")

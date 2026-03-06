@@ -55,7 +55,7 @@ PHASE 2: DEVELOPMENT
   2. Developer claims task ([ ] → [DEV])
   3. Developer calls LLM (deepseek-coder:6.7b) with CLAUDE.md rules + api-spec + existing code
   4. Developer parses FILE:/CODE: blocks from LLM output
-  5. Developer writes .rs files to src/modules/<module>/
+  5. Developer writes .rs files to src/<module>/
   6. Developer runs cargo build
   7. If build fails → self_heal() re-prompts LLM with error output
   8. Developer marks task [TEST] and writes to PROGRESS.md
@@ -229,7 +229,7 @@ Agent runtime: Python 3
 Coding Rules (from CLAUDE.md)
 ------------------------------
 
-- Modular monolith: src/modules/<name>/ with mod.rs, model.rs, service.rs, repository.rs, handlers.rs
+- Modular monolith: src/<name>/ with mod.rs, model.rs, service.rs, repository.rs, handlers.rs
 - No unwrap() in production code
 - Use Result<T, AppError> for error handling
 - API response format: { "data": T, "error": null }

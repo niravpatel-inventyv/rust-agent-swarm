@@ -84,7 +84,7 @@ module_name
 
 Example module:
 
-src/modules/tasks
+src/tasks
 
 Responsibilities:
 

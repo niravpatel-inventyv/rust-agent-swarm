@@ -1,1 +1,1 @@
-Build a task CRUD API using Axum and SQLx
+Build a user CRUD API using Axum and in-memory database

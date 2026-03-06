@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import datetime
 
 # Add agents directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "agents"))
@@ -40,6 +41,9 @@ def run():
 
     print(f"Feature: {feature}")
     print("=" * 60)
+
+    pipeline_start = datetime.now()
+    print(f"Pipeline started at: {pipeline_start.strftime('%Y-%m-%d %H:%M:%S')}")
 
     # =========================================================
     # PHASE 1: ARCHITECTURE (with retry loop)
@@ -105,12 +109,19 @@ def run():
         return
 
     print(f"\nDeveloper: {len(tasks)} tasks to implement")
+    dev_start = datetime.now()
     for i, task in enumerate(tasks, 1):
-        print(f"\n  [{i}/{len(tasks)}] Working on: {task}")
+        task_start = datetime.now()
+        print(f"\n  [{i}/{len(tasks)}] [{task_start.strftime('%H:%M:%S')}] Working on: {task}")
         print("  " + "-" * 36)
         implement_task(task)
+        task_end = datetime.now()
+        elapsed = (task_end - task_start).total_seconds()
+        print(f"  [{task_end.strftime('%H:%M:%S')}] Completed in {elapsed:.1f}s")
 
-    print("\nDeveloper: All tasks implemented\n")
+    dev_end = datetime.now()
+    dev_elapsed = (dev_end - dev_start).total_seconds()
+    print(f"\nDeveloper: All tasks implemented in {dev_elapsed:.1f}s\n")
 
     # =========================================================
     # PHASE 3: TESTING
@@ -189,6 +200,11 @@ def run():
     print("  tasks/APPROVALS.md     - All review sessions")
     print("  tasks/PROGRESS.md      - Development progress")
     print("  reports/test-report.md - Test results")
+
+    pipeline_end = datetime.now()
+    total_elapsed = (pipeline_end - pipeline_start).total_seconds()
+    print(f"\nTotal pipeline time: {total_elapsed:.1f}s ({total_elapsed/60:.1f} min)")
+    print(f"Started: {pipeline_start.strftime('%H:%M:%S')} | Ended: {pipeline_end.strftime('%H:%M:%S')}")
 
 
 if __name__ == "__main__":
